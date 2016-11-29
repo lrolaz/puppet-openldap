@@ -44,6 +44,8 @@ Puppet::Type.newtype(:openldap_database) do
         else
           'hdb'
         end
+      when 'Suse'
+        'bdb'
       end
     end
   end

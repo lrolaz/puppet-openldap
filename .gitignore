@@ -8,3 +8,9 @@ coverage/
 log/
 .*.swp
 *~
+.tmp/
+modules/
+/Puppetfile
+.librarian
+.project
+Puppetfile.lock

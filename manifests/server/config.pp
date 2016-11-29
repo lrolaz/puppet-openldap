@@ -69,6 +69,23 @@ class openldap::server::config {
         }
       }
     }
+  'Suse': {
+      shellvar { 'openldap-ldapi':
+        ensure   => present,
+        target   => '/etc/sysconfig/openldap',
+        variable => 'OPENLDAP_START_LDAPI',
+        value    => empty($::openldap::server::ldapi_ifs) ? {
+          false => 'yes',
+          true  => 'no',    
+        }
+      }
+      shellvar { 'openldap-backend':
+        ensure   => present,
+        target   => '/etc/sysconfig/openldap',
+        variable => 'OPENLDAP_CONFIG_BACKEND',
+        value    => 'ldap',
+      }
+    }
     default: {
       fail "Operating System Family ${::osfamily} not yet supported"
     }
