@@ -79,15 +79,47 @@ class openldap::server::config {
           true  => 'no',    
         }
       }
-      shellvar { 'openldap-backend':
-        ensure   => present,
-        target   => '/etc/sysconfig/openldap',
-        variable => 'OPENLDAP_CONFIG_BACKEND',
-        value    => 'ldap',
+      case $::openldap::server::provider {
+      'augeas': {
+        file { $::openldap::server::conffile:
+          ensure  => file,
+          owner   => $::openldap::server::owner,
+          group   => $::openldap::server::group,
+          mode    => '0640',
+        }
       }
+      'olc': {
+        file { $::openldap::server::conffile:
+          ensure  => file,
+          owner   => $::openldap::server::owner,
+          group   => $::openldap::server::group,
+          mode    => '0640',
+          content => '',
+        } -> file { $::openldap::server::confdir:
+          ensure  => directory,
+          owner   => $::openldap::server::owner,
+          group   => $::openldap::server::group,
+          mode    => '0750',
+          force   => true,
+        }
+	      shellvar { 'openldap-backend':
+	        ensure   => present,
+	        target   => '/etc/sysconfig/openldap',
+	        variable => 'OPENLDAP_CONFIG_BACKEND',
+	        value    => 'ldap',
+	      }
+	      exec { "/usr/sbin/slaptest -f /etc/openldap/slapd.conf -F /etc/openldap/slapd.d" :
+	        user    => $::openldap::server::owner,
+	        creates => "${::openldap::server::confdir}/cn=config/olcDatabase\\={0}config.ldif "
+	      }  
+	    }
+	    default: {
+        fail 'provider must be one of "olc" or "augeas"'
+      }
+	    }
     }
     default: {
       fail "Operating System Family ${::osfamily} not yet supported"
     }
-  }
+ } 
 }

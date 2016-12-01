@@ -7,7 +7,7 @@ Puppet::Type.
 
   # TODO: Use ruby bindings (can't find one that support IPC)
 
-  defaultfor :osfamily => :debian, :osfamily => :redhat
+  defaultfor :osfamily => :debian, :osfamily => :redhat, :osfamily => :suse
 
   mk_resource_methods
 
@@ -147,7 +147,7 @@ Puppet::Type.
   end
 
   def destroy
-    default_confdir = Facter.value(:osfamily) == 'Debian' ? '/etc/ldap/slapd.d' : Facter.value(:osfamily) == 'RedHat' ? '/etc/openldap/slapd.d' : nil
+    default_confdir = Facter.value(:osfamily) == 'Debian' ? '/etc/ldap/slapd.d' : Facter.value(:osfamily) == 'RedHat' ? '/etc/openldap/slapd.d' : Facter.value(:osfamily) == 'Suse' ? '/etc/openldap/slapd.d': nil
     backend = @property_hash[:backend]
 
     fetch_index

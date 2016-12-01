@@ -5,6 +5,7 @@
 VAGRANTFILE_API_VERSION = "2"
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  
   config.vm.define "openldap" do |openldap|
     openldap.vm.box = "opensuse/openSUSE-42.1-x86_64"
     openldap.vm.hostname = "openldap.example.com"
@@ -16,5 +17,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       puppet.facter = { 'fqdn'  => openldap.vm.hostname }
     end
   end
+  
 end
 
