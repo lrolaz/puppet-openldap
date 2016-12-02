@@ -110,8 +110,12 @@ class openldap::server::config {
 	      }
 	      exec { "/usr/sbin/slaptest -f /etc/openldap/slapd.conf -F /etc/openldap/slapd.d" :
 	        user    => $::openldap::server::owner,
-	        creates => "${::openldap::server::confdir}/cn=config/olcDatabase\\={0}config.ldif "
-	      }  
+	        creates => "${::openldap::server::confdir}/cn=config"
+	      } -> file_line  { "olcRootDN-config" :
+	        path     => "${::openldap::server::confdir}/cn=config/olcDatabase={0}config.ldif",
+          line     => "olcRootDN: gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth",
+          match    => "olcRootDN:.*", 
+        }
 	    }
 	    default: {
         fail 'provider must be one of "olc" or "augeas"'

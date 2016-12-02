@@ -296,3 +296,19 @@ openldap::server::overlay { "rwm on relay":
   },
 }
 ```
+
+dn: ou=people,dc=pictet,dc=com
+ou: people
+objectClass: top
+objectClass: organizationalUnit
+description: Parent object of all UNIX accounts
+
+dn: cn=krbcontainer,dc=pictet,dc=com
+cn: krbcontainer
+objectClass: krbContainer
+
+dn: ou=groups,dc=pictet,dc=com
+ou: groups
+objectClass: top
+objectClass: organizationalUnit
+description: Parent object of all UNIX groups
