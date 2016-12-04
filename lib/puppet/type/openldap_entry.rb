@@ -1,89 +1,55 @@
-
 Puppet::Type.newtype(:openldap_entry) do
-  @doc = 'Type to manage LDAP entries'
 
-  ensurable
+  ensurable do
+
+    newvalue(:present) do
+      provider.create
+    end
+
+    newvalue(:absent) do
+      provider.destroy
+    end
+
+    defaultto :present
+
+  end
+
+  @doc = <<-EOS
+    This type provides the capability to manage LDAP DN entries.
+  EOS
 
   newparam(:name) do
-    desc 'Name of LDAP entry i.e. cn=Foo,ou=Bar,dc=baz,dc=co,dc=uk'
+    desc <<-EOS
+      The canonical name of the rule.
+    EOS
     isnamevar
+
+    newvalues(/^.*$/)
   end
 
-  newparam(:host) do
-    desc 'Host Address (FQDN or IP) of the LDAP server'
+  newparam(:attributes, :array_matching => :all) do
+    desc "Specify the attribute you want to ldapmodify"
   end
 
-  newparam(:base) do
-    desc 'LDAP tree base i.e. dc=foo,dc=co,dc=uk'
-    validate do |value|
-      unless value.is_a? String
-        raise ArgumentError, 'ldap_entry::base is not a string'
-      end
-    end
+  newparam(:remote_ldap) do
+    desc "Specify the remote ldap server"
   end
 
-  newparam(:port) do
-    desc  'Port of the LDAP server (default 389)'
-    defaultto 636
-    validate do |value|
-      unless (1..65535).include?(value.to_i)
-        raise ArgumentError, 'ldap_entry::port is not a whole number in the range 1-65535'
-      end
-    end
+  newparam(:unique_attributes, :array_matching => :all) do
+    desc "Specify the attribute that are unique in the dn"
   end
 
-  newparam(:username) do
-    desc 'Username of admin account on LDAP server'
-    defaultto 'admin'
-    validate do |value|
-      unless value.is_a? String
-        raise ArgumentError, 'ldap_entry::username is not a string'
-      end
-    end
+  newparam(:indifferent_attributes, :array_matching => :all) do
+    desc "Specify the attributes you dont care about their subsequent values (e.g. passwords)"
   end
 
-  newparam(:password) do
-    desc 'Password of admin account on LDAP server'
-    validate do |value|
-      unless value.is_a? String
-        raise ArgumentError, 'ldap_entry::password is not a string'
-      end
-    end
+  newparam(:dn) do
+    desc "Specify the value of the attribute you want to ldapmodify"
+    defaultto { @resource[:name] }
   end
 
-  newparam(:attributes) do
-    desc 'LDAP entry attributes as a hash i.e. { :givenName => "Foo",
-                                                 :objectClass =>
-                                                   ["top", "person", "inetorgPerson"]}'
-    validate do |value|
-      unless value.is_a? Hash
-        raise ArgumentError, 'ldap_entry::attributes is not a hash'
-      end
-    end
+  newparam(:auth_opts) do
+    desc "Specify the options passed to ldapadd/ldapmodify for authentication. Defaults to -QY EXTERNAL."
   end
-
-  newparam(:mutable) do
-    desc 'LDAP entry attribute(s) which may be externally modified'
-    defaultto []
-  end
-
-  newparam(:self_signed) do
-    desc 'Whether the LDAP server certificate is self-signed'
-    defaultto false
-  end
-
-  newparam(:ssl) do
-    desc 'Whether the LDAP server uses SSL'
-    defaultto true
-  end
-
-  # Add autorequire
-  autorequire(:ldap_entry) do
-    # Strip off the first dn to autorequire the parent
-    parent = self[:name].split(",").drop(1).join(",")
-    parent
-  end
-  # The server has to run before we can add entries to the database
-  autorequire(:service) { 'ldap-server' }
 
 end

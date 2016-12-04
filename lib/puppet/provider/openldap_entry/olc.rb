@@ -1,196 +1,229 @@
-require 'rubygems' if RUBY_VERSION < '1.9.0' && Puppet.version < '3'
-require 'net/ldap' if Puppet.features.net_ldap?
+require File.expand_path(File.join(File.dirname(__FILE__), %w[.. openldap]))
+require 'tempfile'
 
-Puppet::Type.type(:ldap_entry).provide(:ldap) do
-  confine :feature => :net_ldap
+Puppet::Type.type(:openldap_entry).provide(:olc, :parent => Puppet::Provider::Openldap) do
+  desc ""
 
-  public
+  commands :ldapmodifycmd => "ldapmodify"
+  commands :ldapaddcmd => "ldapadd"
+  commands :ldapsearchcmd => "ldapsearch"
 
-  require 'set'
+  def create()
+    ldap_apply_work
+  end
 
-  def exists?
-    disable_ssl_verify if (resource[:self_signed] == true)
-    @ssl = true if (resource[:ssl] == true)
-    status, results = ldap_search([resource[:host], resource[:port], resource[:username], resource[:password],
-                   {:base => resource[:name], :attributes => attributes(resource[:attributes])}])
-    if status == LDAP::NoSuchObject
-      return false
-    elsif status == LDAP::Success
-      results.select{|r| r.dn == resource[:name]}.each do |entry|
-        @entry = entry
-        @mutable = [resource[:mutable]].flatten
-        matching = resource[:attributes].all? do |k, _|
-          return false unless entry.respond_to?(k)
-          return true if @mutable.include? k
-          entry.send(k).sort.join(",").force_encoding('UTF-8') == [resource[:attributes][k]].flatten.sort.join(",")
-        end
-        return matching
-      end
-      return nil if results.empty?
+  def destroy()
+    ldap_apply_work
+  end
+
+  def exists?()
+    @work_to_do = ldap_work_to_do(parse_attributes)
+
+    # This is a bit of a butchery of an exists? method which is designed to return yes or no,
+    # Whereas we are editing a multi-faceted record, and it might be in a semi-desired state.
+    # However, as I want to still use the ensure() param, I will have to live within its rules
+
+    if @work_to_do.empty?
+      return true if resource[:ensure] == :present
+      return false if resource[:ensure] == :absent
     else
-      raise "LDAP Error #{status}: #{results}. Check server log for more info."
+      return false if resource[:ensure] == :present
+      return true if resource[:ensure] == :absent
     end
+
   end
 
-  def destroy
-    status, message = ldap_remove([resource[:host], resource[:port], resource[:username], resource[:password],
-          {:dn => resource[:name]}])
-    raise "LDAP Error #{status}: #{message}. Check server log for more info." unless status == LDAP::Success
+  def parse_attributes
+
+    ldap_attributes = {}
+    Array(resource[:attributes]).each do |asserted_attribute|
+      key,value = asserted_attribute.split(':', 2)
+      ldap_attributes[key] = [] if ldap_attributes[key].nil?
+      ldap_attributes[key] << value.strip!
+    end
+    ldap_attributes
+
   end
 
-  def create
-    if @entry
-      resource[:attributes].each do |k, v|
-        if @entry.respond_to?(k)
-          next if @mutable.include? k
-          unless @entry.send(k).to_set == [v].flatten.to_set
-            ldap_replace_attribute([resource[:host], resource[:port], resource[:username], resource[:password],
-                        [resource[:name], k, v]])
+  def ldap_apply_work
+    @work_to_do.each do |modify_type, modifications|
+
+      modify_record = []
+      modify_record << "dn: #{resource[:dn]}"
+
+      modify_record << "changetype: modify" if modify_type == :ldapmodify
+
+      modifications.each do |attribute, instructions|
+        add_type="add"
+        instructions.each do |instruction|
+          case instruction.first
+          when :add
+            modify_record << "add: #{attribute}" if add_type == "add" and modify_type == :ldapmodify
+            modify_record << "#{attribute}: #{instruction.last}"
+            modify_record << "-" if modify_type == :ldapmodify
+          when :delete
+            modify_record << "delete: #{attribute}"
+            modify_record << "-"
+          when :replace
+            modify_record << "replace: #{attribute}" if add_type == "add"
+            add_type = "replace"
           end
+        end
+      end
+
+      ldif = Tempfile.open("ldap_apply_work")
+      ldif_file = ldif.path
+      ldif.write modify_record.join("\n")
+      ldif.close
+
+      cmd = case modify_type
+      when :ldapmodify
+        :ldapmodifycmd
+      when :ldapadd
+        :ldapaddcmd
+      end
+
+      begin
+        if resource[:remote_ldap]
+          command = [command(cmd), "-H", "ldap://#{resource[:remote_ldap]}", "-d", "0", "-f", ldif_file]
         else
-          ldap_add_attribute([resource[:host], resource[:port], resource[:username], resource[:password],
-                        [resource[:name], k, v]])
+          command = [command(cmd), "-H", "ldapi:///", "-d", "0", "-f", ldif_file]
         end
+        command += resource[:auth_opts] || ["-QY", "EXTERNAL"]
+        Puppet.debug("\n\n" + File.open(ldif_file, 'r') { |file| file.read })
+        output = execute(command)
+        Puppet.debug(output)
+      rescue Puppet::ExecutionFailure => ex
+        raise Puppet::Error, "Ldap Modify Error:\n\n#{modify_record.join("\n")}\n\nError details:\n#{ex.message}"
+      # ensure
+        # ldif.unlink
       end
+
+    end
+
+  end
+
+  def ldap_work_to_do(asserted_attributes)
+    if resource[:remote_ldap]
+      command = [command(:ldapsearchcmd), "-H", "ldap://#{resource[:remote_ldap]}", "-b", resource[:dn], "-s", "base", "-LLL", "-d", "0"]
     else
-      status, message = ldap_add([resource[:host], resource[:port], resource[:username], resource[:password],
-                          {:dn => resource[:name], :attributes => resource[:attributes]}])
+      command = [command(:ldapsearchcmd), "-H", "ldapi:///", "-b", resource[:dn], "-s", "base", "-LLL", "-d", "0"]
     end
-    raise "LDAP Error #{status}: #{message}. Check server log for more info." unless status == LDAP::Success
-  end
-
-  private
-
-  def attributes(attrs)
-    return [] unless resource[:attributes]
-    attrs.keys.map(&:to_s)
-  end
-
-  def ldap_search(args)
-    ldap = ldap(args)
-    Puppet.debug("LDAP Search: #{params(args).inspect}")
-    args = params(args)
-    result = ldap.search(args)
-    code, message = return_code_and_message(ldap)
-
-    if(code == LDAP::Success)
-      [code, result]
-    else
-      [code, message]
+    command += resource[:auth_opts] || ["-QY", "EXTERNAL"]
+    begin
+      ldapsearch_output = execute(command)
+      Puppet.debug("ldapdn >>\n#{to_json2(asserted_attributes)}")
+      Puppet.debug("ldapsearch >>\n#{ldapsearch_output}")
+    rescue Puppet::ExecutionFailure => ex
+      if ex.message.scan '/No such object (32)/'
+        Puppet.debug("Could not find object: #{resource[:dn]}")
+        return {} if resource[:ensure] == :absent
+        work_to_do = {}
+        asserted_attributes.each do |asserted_key, asserted_values|
+          key_work_to_do = []
+          asserted_values.each do |asserted_value|
+            key_work_to_do << [ :add, asserted_value ]
+          end
+          work_to_do[asserted_key] = key_work_to_do
+        end
+        Puppet.debug("WorkToDo: { :ldapadd => #{work_to_do}}")
+        return { :ldapadd => work_to_do }
+      else
+        raise ex
+      end
     end
-  end
 
-  def ldap_add(args)
-    ldap = ldap(args)
-    Puppet.info("LDAP Add: #{params(args).inspect}")
-    ldap.add(params(args))
-    return_code_and_message(ldap)
-  end
+    unique_attributes = resource[:unique_attributes]
+    unique_attributes = [] if unique_attributes.nil?
 
-  def ldap_remove(args)
-    ldap = ldap(args)
-    Puppet.info("LDAP Remove: #{params(args).inspect}")
-    ldap.delete(params(args))
-    return_code_and_message(ldap)
-  end
+    indifferent_attributes = resource[:indifferent_attributes]
+    indifferent_attributes = [] if indifferent_attributes.nil?
 
-  def ldap_add_attribute(args)
-    ldap = ldap(args)
-    Puppet.info("LDAP Add Attribute: #{params(args).inspect}")
-    ldap.add_attribute(*params(args))
-    return_code_and_message(ldap)
-  end
+    work_to_do = {}
+    found_attributes = {}
+    found_keys = []
 
-  def ldap_replace_attribute(args)
-    ldap = ldap(args)
-    Puppet.info("LDAP Replace Attribute: #{params(args).inspect}")
-    ldap.replace_attribute(*params(args))
-    return_code_and_message(ldap)
-  end
-
-  def ldap(args)
-    host, port, admin_user, admin_password, _ = args
-    ldap = Net::LDAP.new({:host => host, :port => port, :auth => {:method => :simple,
-                          :username => admin_user, :password => admin_password}}.
-                          merge(@ssl ? {:encryption => :simple_tls} : {}))
-    Puppet.debug("Connecting to LDAP server ldaps://#{host}:#{port}")
-    ldap.bind
-    ldap
-  end
-
-  def params(args)
-    args[4]
-  end
-
-  def return_code_and_message(ldap)
-    result = ldap.get_operation_result
-    return result.code, LDAP.lookup_error(result.code)
-  end
-
-  # For more, see http://www.zytrax.com/books/ldap/ch12/
-  module LDAP
-    Success                      = 0
-    OperationsError              = 1
-    ProtocolError                = 2
-    TimeLimitExceeded            = 3
-    SizeLimitExceeded            = 4
-    CompareFalse                 = 5
-    CompareTrue                  = 6
-    StrongAuthNotSupported       = 7
-    StrongAuthRequired           = 8
-    OnlyPartialResultsReturned   = 9
-    LdapReferral                 = 10
-    AdminLimitExceeded           = 11
-    UnavailableCriticalExtension = 12
-    ConfidentialityRequired      = 13
-    SaslBindInProgress           = 14
-    NoSuchAttribute              = 16
-    UndefinedAttributeType       = 17
-    InappropriateMatching        = 18
-    ConstraintViolation          = 19
-    AttributeOrValueExists       = 20
-    InvalidSyntax                = 21
-    NoSuchObject                 = 32
-    AliasProblem                 = 33
-    InvalidDNSyntax              = 34
-    ObjectIsLeaf                 = 35
-    AliasDereferenceProblem      = 36
-    InappropriateAuthentication  = 48
-    InvalidCredentials           = 49
-    InsufficientAccessRights     = 50
-    Busy                         = 51
-    Unavailable                  = 52
-    UnwillingToPerform           = 53
-    LoopDetected                 = 54
-    NamingViolation              = 64
-    ObjectClassViolation         = 65
-    NotAllowedOnNonLeaf          = 66
-    NotAllowedOnRDN              = 67
-    EntryAlreadyExists           = 68
-    NoObjectClassModifications   = 69
-    ResultsTooLarge              = 70
-    AffectsMultipleDSAs          = 71
-    UnknownError                 = 80
-
-    def self.lookup_error(code)
-      Hash[constants.collect{|c| [
-        LDAP.const_get(c), c.to_s.gsub(/([A-Z])/, ' \1').strip
-      ]}][code]
+    asserted_attributes.each do |asserted_key, asserted_value|
+      work_to_do[asserted_key] = []
+      found_attributes[asserted_key] = []
     end
-  end
 
-  # Re-open the SSL context class and disable SSL verification
-  # Needed for self-signed certs
-  require 'openssl'
-  def disable_ssl_verify
-    if OpenSSL::SSL::SSLContext.new.verify_mode != OpenSSL::SSL::VERIFY_NONE
-      OpenSSL::SSL::SSLContext.class_eval do
-        alias_method :original, :initialize
-        def initialize
-          original
-          @verify_mode = OpenSSL::SSL::VERIFY_NONE
+    ldapsearch_output.split(/\r?\n(?!\s)/).each do |line|
+      line.gsub!(/[\r\n] /, '')
+      line.gsub!(/\r?\n?$/, '')
+      current_key,current_value = line.split(/:+ /, 2)
+      found_keys << current_key
+      if asserted_attributes.key?(current_key)
+        Puppet.debug("search() #{current_key}: #{current_value}")
+        same_as_an_asserted_value = false
+        asserted_attributes[current_key].each do |asserted_value|
+          Puppet.debug("check() #{current_key}: #{current_value}  <===>  #{current_key}: #{asserted_value}")
+          same_as_an_asserted_value = true if asserted_value == current_value
+          same_as_an_asserted_value = true if asserted_value.clone.gsub(/^\{.*?\}/, "") == current_value.clone.gsub(/^\{.*?\}/, "")
+        end
+        if same_as_an_asserted_value
+          Puppet.debug("asserted and found: #{current_key}: #{current_value}")
+          work_to_do[current_key] << [ :delete ] if resource[:ensure] == :absent
+          found_attributes[current_key] << current_value.clone.gsub(/^\{.*?\}/, "")
+        else
+          Puppet.debug("not asserted: #{current_key}: #{current_value}")
+          work_to_do[current_key] << [ :replace ] if resource[:ensure] == :present \
+                                                 and unique_attributes.include?(current_key) \
+                                                 and !indifferent_attributes.include?(current_key)
         end
       end
     end
+
+    asserted_attributes.each do |asserted_key, asserted_values|
+      asserted_values.each do |asserted_value|
+
+        Puppet.debug("assert() #{asserted_key}: #{asserted_value}")
+
+        if resource[:ensure] == :present
+          work_to_do[asserted_key] << [ :add, asserted_value ] unless found_attributes[ asserted_key ].include?(asserted_value.clone.gsub(/^\{.*?\}/, "")) \
+                                                                   or (found_keys.include?(asserted_key) and indifferent_attributes.include?(asserted_key))
+        end
+
+      end
+    end
+
+    work_to_do.delete_if {|key, operations| operations.empty?}
+
+    if work_to_do.empty?
+      Puppet.debug("conclusion: nothing to do")
+      {}
+    else
+      Puppet.debug("conclusion: work to do: #{to_json2(work_to_do)}")
+      { :ldapmodify => work_to_do }
+    end
+
   end
+
+
+  def to_json2(stringin)
+
+    case stringin.class.to_s
+    when "String"
+      return "'" + stringin + "'"
+    when "Array"
+      x = []
+      stringin.each do |term|
+        x << to_json2(term)
+      end
+      return "[ " + x.join(', ') + " ]"
+    when "Hash"
+      x = []
+      stringin.each do |key, value|
+        x << [to_json2(key), to_json2(value)]
+      end
+      return "{ " + x.collect {|k| k.first.to_s + " => " + k.last.to_s}.join(', ') + " }"
+    when "Symbol"
+      return ":" + stringin.to_s
+    else
+      return "!OBJ(" + stringin.class.to_s + ":" + stringin.to_s + ")"
+    end
+    return ""
+  end
+
+
 end
