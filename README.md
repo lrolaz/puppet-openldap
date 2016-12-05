@@ -2,30 +2,12 @@ OpenLDAP
 ========
 
 [![Puppet Forge Version](http://img.shields.io/puppetforge/v/camptocamp/openldap.svg)](https://forge.puppetlabs.com/camptocamp/openldap)
-[![Puppet Forge Downloads](http://img.shields.io/puppetforge/dt/camptocamp/openldap.svg)](https://forge.puppetlabs.com/camptocamp/openldap)
-[![Build Status](https://img.shields.io/travis/camptocamp/puppet-openldap/master.svg)](https://travis-ci.org/camptocamp/puppet-openldap)
-[![Puppet Forge Endorsement](https://img.shields.io/puppetforge/e/camptocamp/openldap.svg)](https://forge.puppetlabs.com/camptocamp/openldap)
-[![Gemnasium](https://img.shields.io/gemnasium/camptocamp/puppet-openldap.svg)](https://gemnasium.com/camptocamp/puppet-openldap)
-[![By Camptocamp](https://img.shields.io/badge/by-camptocamp-fb7047.svg)](http://www.camptocamp.com)
 
 Overview
 --------
 
 The openldap module allows you to easily manage OpenLDAP with Puppet.
-By default it will use OLC (cn=config).
 
-Features supported per provider
--------------------------------
-
-Object      | olc (slapd.d) | augeas (slapd.conf)
-------------|---------------|-----------
-global_conf | Y             | N
-database    | Y             | Y
-module      | Y             | N
-overlay     | Y             | N
-access      | Y             | N
-index       | Y             | N
-schema      | Y             | N
 
 Usage
 -----
@@ -296,19 +278,3 @@ openldap::server::overlay { "rwm on relay":
   },
 }
 ```
-
-dn: ou=people,dc=pictet,dc=com
-ou: people
-objectClass: top
-objectClass: organizationalUnit
-description: Parent object of all UNIX accounts
-
-dn: cn=krbcontainer,dc=pictet,dc=com
-cn: krbcontainer
-objectClass: krbContainer
-
-dn: ou=groups,dc=pictet,dc=com
-ou: groups
-objectClass: top
-objectClass: organizationalUnit
-description: Parent object of all UNIX groups
