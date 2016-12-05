@@ -14,6 +14,9 @@ openldap::server::schema { 'core':
 } -> openldap::server::schema { 'inetorgperson':
   ensure  => present,
   path    => '/etc/openldap/schema/inetorgperson.schema', 
+} -> openldap::server::schema { 'samba3':
+  ensure  => present,
+  path    => '/etc/openldap/schema/samba3.schema',   
 } -> openldap::server::database { 'dc=pictet,dc=com':
   ensure => present,
   rootdn    => 'cn=admin,dc=pictet,dc=com',
@@ -26,7 +29,7 @@ openldap::server::schema { 'core':
   unique_attributes => ["ou"],
   ensure => present,
 }
- 
+
  
  package { 'krb5-server' :
   ensure  => installed, 
@@ -96,11 +99,21 @@ openldap::server::schema { 'core':
 } -> service { 'krb5kdc.service' :
   ensure => running,
   enable => true,
+} -> openldap::server::module { 'smbkrb5pwd':
+  ensure  => present,    
+} -> openldap::server::overlay { 'smbkrb5pwd on dc=pictet,dc=com':
+  ensure  => present,
+  options => {
+   "olcSmbKrb5PwdMustChange" => "2592012",
+   "olcSmbKrb5PwdEnable" => "krb5",
+   "olcSmbKrb5PwdKrb5Realm" => "PICTET.COM", 
+  },    
 } -> openldap::server::entry{"user01":
   dn => "cn=user01,ou=people,dc=pictet,dc=com",
   attributes => [ 
     "cn: user01",
     "sn: user01",
+    "uid: user01",
     "objectClass: inetOrgPerson",
     "displayName: User01", 
   ],
