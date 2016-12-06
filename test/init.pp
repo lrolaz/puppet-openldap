@@ -106,7 +106,8 @@ openldap::server::schema { 'core':
   options => {
    "olcSmbKrb5PwdMustChange" => "2592012",
    "olcSmbKrb5PwdEnable" => "krb5",
-   "olcSmbKrb5PwdKrb5Realm" => "PICTET.COM", 
+   "olcSmbKrb5PwdKrb5Realm" => "PICTET.COM",
+   "olcSmbKrb5PwdRequiredClass" => "inetOrgPerson",
   },    
 } -> openldap::server::entry{"user01":
   dn => "cn=user01,ou=people,dc=pictet,dc=com",
@@ -120,7 +121,4 @@ openldap::server::schema { 'core':
     
   unique_attributes => ["cn"],    
   ensure => present,
-} -> exec { "/usr/lib/mit/sbin/kadmin.local -q 'addprinc -pw secret user01'" :
-  unless => "/usr/lib/mit/sbin/kadmin.local -q 'get_principal user01' | /usr/bin/grep 'Principal: user01'",
 }
-

@@ -1,0 +1,7 @@
+###############################################################################
+#Kerberos_principal      permissions     [target_principal]      [restrictions]
+###############################################################################
+#
+*/admin@EXAMPLE.COM  *
+smbkrb5pwd/*@PICTET.COM alic *
+
