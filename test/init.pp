@@ -86,6 +86,14 @@ openldap::server::schema { 'core':
     kdc = FILE:/var/log/krb5/krb5kdc.log
     admin_server = FILE:/var/log/krb5/kadmind.log
     default = SYSLOG:NOTICE:DAEMON'
+} -> file { '/var/lib/kerberos/krb5kdc/kadm5.acl':
+  ensure  => file,
+  content => '###############################################################################
+#Kerberos_principal      permissions     [target_principal]      [restrictions]
+###############################################################################
+#
+*/admin@PICTET.COM  *
+smbkrb5pwd/*@PICTET.COM alic *'
 }
 -> exec { "Create Kerberos Realm" :
   command => '/usr/lib/mit/sbin/kdb5_ldap_util -D cn=admin,dc=pictet,dc=com -w secret -P secret create -r PICTET.COM -s -H ldap://',
@@ -96,9 +104,25 @@ openldap::server::schema { 'core':
   ensure  => file,
   mode    => 700,
   content => 'cn=admin,dc=pictet,dc=com#{HEX}736563726574',
-} -> service { 'krb5kdc.service' :
+} 
+-> service { 'krb5kdc.service' :
   ensure => running,
   enable => true,
+}
+-> service { 'kadmind.service' :
+  ensure => running,
+  enable => true,
+}
+-> file {"/usr/lib/openldap/modules/smbkrb5pwd.tar.gz":
+  owner   => "root",
+  group   => "root",
+  mode    => 775,
+  ensure  => present,
+  source  => "puppet:///modules/openldap/smbkrb5pwd.tar.gz",
+} ~> exec { "Install smbkrb5pwd":
+  command     => "/bin/tar xf /usr/lib/openldap/modules/smbkrb5pwd.tar.gz",
+  cwd         => "/usr/lib/openldap/modules",
+  refreshonly => true,
 } -> openldap::server::module { 'smbkrb5pwd':
   ensure  => present,    
 } -> openldap::server::overlay { 'smbkrb5pwd on dc=pictet,dc=com':
@@ -109,7 +133,28 @@ openldap::server::schema { 'core':
    "olcSmbKrb5PwdKrb5Realm" => "PICTET.COM",
    "olcSmbKrb5PwdRequiredClass" => "inetOrgPerson",
   },    
-} -> openldap::server::entry{"user01":
+}
+-> exec { "Create smbkrb5pwd Kerberos Key" :
+  command => '/usr/lib/mit/sbin/kadmin.local -q "addprinc -randkey smbkrb5pwd/openldap.example.com@PICTET.COM"',
+  unless => "/usr/lib/mit/sbin/kadmin.local -q 'get_principal smbkrb5pwd/openldap.example.com' | /usr/bin/grep 'Principal: smbkrb5pwd'",
+}
+-> exec { "Install smbkrb5pwd Kerberos Key" :
+  command => '/usr/lib/mit/sbin/kadmin.local -q "ktadd -k /etc/openldap/slapd.d/openldap-krb5.keytab smbkrb5pwd/openldap.example.com@PICTET.COM"',
+  creates => "/etc/openldap/slapd.d/openldap-krb5.keytab",
+} ~> exec { "Restart slapd" :
+  command     => "/usr/bin/systemctl restart slapd",
+  refreshonly => true,
+}
+-> openldap::server::entry{"people":
+  dn => "ou=people,dc=pictet,dc=com",
+  attributes => [ 
+    "ou: people",
+    "objectClass: organizationalUnit",
+  ],
+  unique_attributes => ["cn"],    
+  ensure => present,
+}
+-> openldap::server::entry{"user01":
   dn => "cn=user01,ou=people,dc=pictet,dc=com",
   attributes => [ 
     "cn: user01",
@@ -118,7 +163,27 @@ openldap::server::schema { 'core':
     "objectClass: inetOrgPerson",
     "displayName: User01", 
   ],
-    
   unique_attributes => ["cn"],    
   ensure => present,
 }
+-> exec { "user01-password " :
+  command => '/usr/bin/ldappasswd -H ldapi:/// cn=user01,ou=people,dc=pictet,dc=com',
+  unless => '/usr/bin/ldapsearch -b cn=user01,ou=people,dc=pictet,dc=com -H ldapi:/// userPassword=* | /bin/grep ^userPassword',
+}
+-> openldap::server::entry{"user02":
+  dn => "cn=user02,ou=people,dc=pictet,dc=com",
+  attributes => [ 
+    "cn: user02",
+    "sn: user02",
+    "uid: user02",
+    "objectClass: inetOrgPerson",
+    "displayName: User02", 
+  ],
+  unique_attributes => ["cn"],    
+  ensure => present,
+}
+-> exec { "user02-password " :
+  command => '/usr/bin/ldappasswd -H ldapi:/// cn=user02,ou=people,dc=pictet,dc=com',
+  unless => '/usr/bin/ldapsearch -b cn=user02,ou=people,dc=pictet,dc=com -H ldapi:/// userPassword=* | /bin/grep ^userPassword',
+}
+
